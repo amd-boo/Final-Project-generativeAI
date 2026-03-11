@@ -1,104 +1,157 @@
-"""
-CodeCraftHub - Flask REST API for Course Management
-A simple REST API to manage coding courses with JSON file storage.
-"""
-
-from flask import Flask, request, jsonify
-from datetime import datetime
+from flask import Flask, jsonify, request
 import json
 import os
+from datetime import datetime
 
 app = Flask(__name__)
 
 # Configuration
-COURSES_FILE = 'courses.json'
+DATA_FILE = 'courses.json'
 
-
-# ============== Helper Functions ==============
-
+# Helper function to load courses from JSON file
 def load_courses():
-    """Load courses from JSON file. Returns empty list if file doesn't exist."""
-    if not os.path.exists(COURSES_FILE):
+    if not os.path.exists(DATA_FILE):
+        with open(DATA_FILE, 'w') as f:
+            json.dump([], f)
         return []
     
     try:
-        with open(COURSES_FILE, 'r') as file:
-            return json.load(file)
-    except (json.JSONDecodeError, IOError):
+        with open(DATA_FILE, 'r') as f:
+            return json.load(f)
+    except json.JSONDecodeError:
         return []
 
-
+# Helper function to save courses to JSON file
 def save_courses(courses):
-    """Save courses list to JSON file."""
     try:
-        with open(COURSES_FILE, 'w') as file:
-            json.dump(courses, file, indent=2)
+        with open(DATA_FILE, 'w') as f:
+            json.dump(courses, f, indent=2)
         return True
-    except IOError as e:
-        print(f"Error saving courses: {e}")
+    except Exception as e:
         return False
 
-
+# Get next available ID
 def get_next_id(courses):
-    """Generate the next available course ID."""
     if not courses:
         return 1
     return max(course['id'] for course in courses) + 1
 
+# ----------------------------
+# REST API endpoints
+# ----------------------------
 
-def get_current_timestamp():
-    """Get current timestamp in readable format."""
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-
-def find_course_by_id(courses, course_id):
-    """Find a course by ID. Returns (course, index) or (None, -1) if not found."""
-    for index, course in enumerate(courses):
-        if course['id'] == course_id:
-            return course, index
-    return None, -1
-
-
-def validate_course_data(data, required_fields=None):
-    """Validate course data. Returns (is_valid, error_message)."""
-    if required_fields is None:
-        required_fields = ['name']
-    
-    if not data:
-        return False, "Request body is required"
-    
-    for field in required_fields:
-        if field not in data or not str(data[field]).strip():
-            return False, f"'{field}' is required and cannot be empty"
-    
-    # Validate status if provided
-    valid_statuses = ['Not Started', 'In Progress', 'Completed']
-    if 'status' in data and data['status'] not in valid_statuses:
-        return False, f"Status must be one of: {', '.join(valid_statuses)}"
-    
-    # Validate target_date format if provided
-    if 'target_date' in data and data['target_date']:
-        try:
-            datetime.strptime(data['target_date'], "%Y-%m-%d")
-        except ValueError:
-            return False, "target_date must be in YYYY-MM-DD format"
-    
-    return True, None
-
-
-# ============== API Routes ==============
-
-@app.route('/')
-def home():
-    """Home endpoint with API information."""
+# GET all courses
+@app.route('/api/courses', methods=['GET'])
+def get_all_courses():
+    courses = load_courses()
     return jsonify({
-        "message": "Welcome to CodeCraftHub API",
-        "version": "1.0.0",
-        "endpoints": {
-            "GET /api/courses": "Get all courses",
-            "GET /api/courses/<id>": "Get a specific course",
-            "POST /api/courses": "Add a new course",
-            "PUT /api/courses/<id>": "Update a course",
-            "DELETE /api/courses/<id>": "Delete a course",
-            "GET /api/courses/stats": "Get course statistics",
-            "GET /api/courses/search?q=term": "Search courses
+        'success': True,
+        'count': len(courses),
+        'courses': courses
+    }), 200
+
+# GET specific course
+@app.route('/api/courses/<int:course_id>', methods=['GET'])
+def get_course(course_id):
+    courses = load_courses()
+    course = next((c for c in courses if c['id'] == course_id), None)
+    
+    if course:
+        return jsonify({'success': True, 'course': course}), 200
+    return jsonify({'success': False, 'error': 'Course not found'}), 404
+
+# POST new course
+@app.route('/api/courses', methods=['POST'])
+def add_course():
+    data = request.get_json()
+    
+    # Validate required fields
+    required_fields = ['name', 'description', 'target_date', 'status']
+    for field in required_fields:
+        if field not in data:
+            return jsonify({
+                'success': False,
+                'error': f'Missing required field: {field}'
+            }), 400
+    
+    # Validate status
+    valid_statuses = ['Not Started', 'In Progress', 'Completed']
+    if data['status'] not in valid_statuses:
+        return jsonify({
+            'success': False,
+            'error': f'Status must be one of: {", ".join(valid_statuses)}'
+        }), 400
+    
+    courses = load_courses()
+    
+    new_course = {
+        'id': get_next_id(courses),
+        'name': data['name'],
+        'description': data['description'],
+        'target_date': data['target_date'],
+        'status': data['status'],
+        'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    }
+    
+    courses.append(new_course)
+    save_courses(courses)
+    
+    return jsonify({
+        'success': True,
+        'message': 'Course added successfully',
+        'course': new_course
+    }), 201
+
+# PUT update course
+@app.route('/api/courses/<int:course_id>', methods=['PUT'])
+def update_course(course_id):
+    data = request.get_json()
+    courses = load_courses()
+    
+    course_index = next((i for i, c in enumerate(courses) if c['id'] == course_id), None)
+    
+    if course_index is None:
+        return jsonify({'success': False, 'error': 'Course not found'}), 404
+    
+    # Update fields if provided
+    course = courses[course_index]
+    if 'name' in data:
+        course['name'] = data['name']
+    if 'description' in data:
+        course['description'] = data['description']
+    if 'target_date' in data:
+        course['target_date'] = data['target_date']
+    if 'status' in data:
+        course['status'] = data['status']
+    
+    save_courses(courses)
+    
+    return jsonify({
+        'success': True,
+        'message': 'Course updated successfully',
+        'course': course
+    }), 200
+
+# DELETE course
+@app.route('/api/courses/<int:course_id>', methods=['DELETE'])
+def delete_course(course_id):
+    courses = load_courses()
+    course_index = next((i for i, c in enumerate(courses) if c['id'] == course_id), None)
+    
+    if course_index is None:
+        return jsonify({'success': False, 'error': 'Course not found'}), 404
+    
+    deleted_course = courses.pop(course_index)
+    save_courses(courses)
+    
+    return jsonify({
+        'success': True,
+        'message': 'Course deleted successfully',
+        'deleted_course': deleted_course
+    }), 200
+
+if __name__ == '__main__':
+    print("CodeCraftHub API is starting...")
+    print(f"Data will be stored in: {os.path.abspath(DATA_FILE)}")
+    print("API will be available at: http://localhost:5000")
+    app.run(debug=True, host='0.0.0.0', port=5000)
