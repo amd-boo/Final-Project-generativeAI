@@ -150,6 +150,44 @@ def delete_course(course_id):
         'deleted_course': deleted_course
     }), 200
 
+# Stats
+@app.route("/api/courses/stats", methods=["GET"])
+def get_course_stats():
+    """
+    GET /api/courses/stats
+    Returns simple statistics about courses:
+    - total: Total number of courses
+    - Not Started: Number of courses with status "Not Started"
+    - In Progress: Number of courses with status "In Progress"
+    - Completed: Number of courses with status "Completed"
+    """
+    try:
+        courses = load_courses()
+        total = len(courses)
+
+        # Initialize counters for each status
+        counts = {status: 0 for status in ALLOWED_STATUSES}
+        for c in courses:
+            st = c.get("status")
+            if st in counts:
+                counts[st] += 1
+            else:
+                # If there is an unexpected status in data, ignore or handle as needed
+                pass
+
+        stats = {
+            "total": total,
+            "Not Started": counts.get("Not Started", 0),
+            "In Progress": counts.get("In Progress", 0),
+            "Completed": counts.get("Completed", 0),
+        }
+
+        return jsonify(stats), 200
+    except Exception:
+        # In case of unexpected errors, return a generic error
+        return jsonify({"error": "Failed to compute statistics"}), 500
+
+
 if __name__ == '__main__':
     print("CodeCraftHub API is starting...")
     print(f"Data will be stored in: {os.path.abspath(DATA_FILE)}")
